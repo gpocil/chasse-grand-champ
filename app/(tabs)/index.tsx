@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import MapView, { Marker, Polygon } from "react-native-maps";
 import { useCreatePolygons } from "../../hooks/useCreatePolygon";
 import { useGeolocation } from "../../hooks/useGeolocation";
@@ -26,10 +26,55 @@ export default function HomeScreen() {
     addPoint,
     savePolygons,
     loadPolygons,
+    deletePolygon,
     setCurrentZone,
     setCurrentPolygon,
   } = useCreatePolygons();
   const [showFiles, setShowFiles] = useState(false);
+
+  // Helper function: point-in-polygon detection (ray casting algorithm)
+  const isPointInPolygon = (
+    point: { latitude: number; longitude: number },
+    polygon: { latitude: number; longitude: number }[]
+  ) => {
+    let x = point.latitude,
+      y = point.longitude;
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      let xi = polygon[i].latitude,
+        yi = polygon[i].longitude;
+      let xj = polygon[j].latitude,
+        yj = polygon[j].longitude;
+      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  };
+
+  // Handle long press on map to delete polygon
+  const handleMapLongPress = (e: any) => {
+    const pressedPoint = e.nativeEvent.coordinate;
+
+    // Check if the pressed point is inside any saved polygon
+    for (let i = 0; i < polygons.length; i++) {
+      if (isPointInPolygon(pressedPoint, polygons[i])) {
+        Alert.alert(
+          "Supprimer le polygone",
+          "Voulez-vous supprimer ce polygone ?",
+          [
+            { text: "Annuler", style: "cancel" },
+            {
+              text: "Supprimer",
+              style: "destructive",
+              onPress: () => deletePolygon(i, zoneType),
+            },
+          ]
+        );
+        return; // Stop after finding the first polygon
+      }
+    }
+  };
 
   useEffect(() => {
     if (mapRef.current) {
@@ -68,6 +113,7 @@ export default function HomeScreen() {
           const { latitude, longitude } = e.nativeEvent.coordinate;
           addPoint(latitude, longitude);
         }}
+        onLongPress={handleMapLongPress}
       >
         <Polygon
           coordinates={coords}
@@ -131,15 +177,27 @@ export default function HomeScreen() {
         )}
       </MapView>
       <PolygonSelection zoneType={zoneType} onZoneTypeChange={setZoneType} />
-      <TouchableOpacity
-        style={styles.saveBtn}
-        onPress={() => currentPolygon.length > 0 && savePolygons(zoneType)}
-        disabled={currentPolygon.length === 0}
-      >
-        <Text style={{ color: "white", fontWeight: "bold" }}>
-          Sauvegarder le polygone
-        </Text>
-      </TouchableOpacity>
+
+      {/* Boutons de sauvegarde et suppression */}
+      <View style={styles.buttonContainer}>
+        <TouchableOpacity
+          style={[styles.actionBtn, styles.saveBtn]}
+          onPress={() => currentPolygon.length > 0 && savePolygons(zoneType)}
+          disabled={currentPolygon.length === 0}
+        >
+          <Text style={{ color: "white", fontWeight: "bold" }}>
+            Sauvegarder
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.actionBtn, styles.discardBtn]}
+          onPress={() => setCurrentPolygon([])}
+          disabled={currentPolygon.length === 0}
+        >
+          <Text style={{ color: "white", fontWeight: "bold" }}>Annuler</Text>
+        </TouchableOpacity>
+      </View>
       {!showFiles && (
         <TouchableOpacity
           style={styles.toggleBtn}
@@ -178,16 +236,26 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   map: { flex: 1 },
-  saveBtn: {
+  buttonContainer: {
     position: "absolute",
     bottom: 40,
     left: 20,
     right: 20,
-    backgroundColor: "#007AFF",
+    flexDirection: "row",
+    gap: 10,
+  },
+  actionBtn: {
+    flex: 1,
     padding: 16,
     borderRadius: 10,
     alignItems: "center",
     elevation: 5,
+  },
+  saveBtn: {
+    backgroundColor: "#007AFF",
+  },
+  discardBtn: {
+    backgroundColor: "#FF3B30",
   },
   toggleBtn: {
     position: "absolute",

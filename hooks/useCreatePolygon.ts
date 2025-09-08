@@ -65,12 +65,35 @@ export function useCreatePolygons() {
     }
   };
 
+  // Supprimer un polygone par index
+  const deletePolygon = async (
+    index: number,
+    zone?: "internal" | "shared" | "forbidden"
+  ) => {
+    const zoneType = zone || currentZone;
+    const newPolygons = polygons.filter((_, idx) => idx !== index);
+    setPolygons(newPolygons);
+    try {
+      await FileSystem.writeAsStringAsync(
+        ZONE_FILES[zoneType],
+        JSON.stringify({ polygons: newPolygons }),
+        {
+          encoding: FileSystem.EncodingType.UTF8,
+        }
+      );
+      console.log(`✅ Polygon deleted from ${ZONE_FILES[zoneType]}`);
+    } catch (err) {
+      console.error("❌ Error deleting polygon", err);
+    }
+  };
+
   return {
     polygons,
     currentPolygon,
     addPoint,
     savePolygons,
     loadPolygons,
+    deletePolygon,
     currentZone,
     setCurrentZone,
     setCurrentPolygon,
