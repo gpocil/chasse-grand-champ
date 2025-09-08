@@ -97,5 +97,6 @@ export function useCreatePolygons() {
     currentZone,
     setCurrentZone,
     setCurrentPolygon,
+    setPolygons,
   };
 }
