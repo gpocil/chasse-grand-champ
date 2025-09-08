@@ -167,6 +167,31 @@ export default function HomeScreen() {
           />
         )}
 
+        {/* Afficher les points du polygone en cours de création */}
+        {currentPolygon.map((point, idx) => (
+          <Marker
+            key={`current-point-${idx}`}
+            coordinate={point}
+            anchor={{ x: 0.5, y: 0.5 }}
+          >
+            <View
+              style={[
+                styles.pointMarker,
+                {
+                  backgroundColor:
+                    zoneType === "internal"
+                      ? "blue"
+                      : zoneType === "shared"
+                      ? "gold"
+                      : "red",
+                },
+              ]}
+            >
+              <Text style={styles.pointText}>{idx + 1}</Text>
+            </View>
+          </Marker>
+        ))}
+
         {location && (
           <Marker
             coordinate={{
@@ -256,6 +281,20 @@ const styles = StyleSheet.create({
   },
   discardBtn: {
     backgroundColor: "#FF3B30",
+  },
+  pointMarker: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "white",
+  },
+  pointText: {
+    color: "white",
+    fontSize: 12,
+    fontWeight: "bold",
   },
   toggleBtn: {
     position: "absolute",
