@@ -10,6 +10,9 @@ import coordinatesData from "./coordinates.json";
 import { loadCadastrePolygons } from "./loadCadastre";
 import parcelColorsData from "./parcelColors.json";
 
+// DEV constant - set to false for production mode
+const DEV = false;
+
 export default function HomeScreen() {
   const mapRef = useRef<MapView | null>(null);
   const { location, errorMsg } = useGeolocation(5, 5);
@@ -37,7 +40,7 @@ export default function HomeScreen() {
     return loadCadastrePolygons();
   }, []);
 
-  // Charger les couleurs au démarrage (depuis le fichier statique et l'appareil) - UNE SEULE FOIS
+  // Charger les couleurs au démarrage
   useEffect(() => {
     if (colorsLoaded) return; // Éviter les rechargements multiples
 
@@ -46,35 +49,48 @@ export default function HomeScreen() {
         // 1. Charger les couleurs depuis le fichier statique du code
         const staticColors = (parcelColorsData as any).parcelColors || {};
 
-        // 2. Essayer de charger les couleurs depuis l'appareil
-        let deviceColors = {};
-        try {
-          const filePath = FileSystem.documentDirectory + "parcelColors.json";
-          const deviceData = await FileSystem.readAsStringAsync(filePath);
-          const parsedDeviceData = JSON.parse(deviceData);
-          deviceColors = parsedDeviceData.parcelColors || {};
+        if (DEV) {
+          // Mode développement : charger aussi depuis l'appareil
+          let deviceColors = {};
+          try {
+            const filePath = FileSystem.documentDirectory + "parcelColors.json";
+            const deviceData = await FileSystem.readAsStringAsync(filePath);
+            const parsedDeviceData = JSON.parse(deviceData);
+            deviceColors = parsedDeviceData.parcelColors || {};
+            console.log(
+              "📱 Couleurs chargées depuis l'appareil:",
+              Object.keys(deviceColors).length
+            );
+          } catch (error) {
+            console.log("📱 Aucun fichier de couleurs sur l'appareil");
+          }
+
+          // 3. Combiner les couleurs (l'appareil a priorité sur le code statique)
+          const combinedColors = { ...staticColors, ...deviceColors };
+          setParcelColors(combinedColors);
+
           console.log(
-            "📱 Couleurs chargées depuis l'appareil:",
+            "🎨 Couleurs totales chargées:",
+            Object.keys(combinedColors).length
+          );
+          console.log(
+            "🎨 Depuis le code statique:",
+            Object.keys(staticColors).length
+          );
+          console.log(
+            "🎨 Depuis l'appareil:",
             Object.keys(deviceColors).length
           );
-        } catch (error) {
-          console.log("📱 Aucun fichier de couleurs sur l'appareil");
+        } else {
+          // Mode production : seulement le fichier statique
+          setParcelColors(staticColors);
+          console.log(
+            "🎨 Mode production - Couleurs chargées depuis le code:",
+            Object.keys(staticColors).length
+          );
         }
 
-        // 3. Combiner les couleurs (l'appareil a priorité sur le code statique)
-        const combinedColors = { ...staticColors, ...deviceColors };
-        setParcelColors(combinedColors);
         setColorsLoaded(true);
-
-        console.log(
-          "🎨 Couleurs totales chargées:",
-          Object.keys(combinedColors).length
-        );
-        console.log(
-          "🎨 Depuis le code statique:",
-          Object.keys(staticColors).length
-        );
-        console.log("🎨 Depuis l'appareil:", Object.keys(deviceColors).length);
       } catch (error) {
         console.error("❌ Erreur lors du chargement des couleurs:", error);
         setColorsLoaded(true);
@@ -99,8 +115,10 @@ export default function HomeScreen() {
     }
   };
 
-  // Fonction pour colorier une parcelle
+  // Fonction pour colorier une parcelle (seulement en mode DEV)
   const colorParcel = (parcelId: string) => {
+    if (!DEV) return; // Pas de coloration en mode production
+
     const newColors = { ...parcelColors };
     if (newColors[parcelId] === zoneType) {
       // Si déjà colorié avec cette couleur, on enlève la couleur
@@ -113,8 +131,10 @@ export default function HomeScreen() {
     console.log(`🎨 Parcelle ${parcelId} colorée en ${zoneType}`);
   };
 
-  // Fonction pour exporter les colorations dans un fichier sur l'appareil
+  // Fonction pour exporter les colorations dans un fichier sur l'appareil (seulement en mode DEV)
   const exportColors = async () => {
+    if (!DEV) return;
+
     try {
       const exportData = {
         parcelColors: parcelColors,
@@ -218,7 +238,7 @@ export default function HomeScreen() {
           latitudeDelta: 0.01,
           longitudeDelta: 0.01,
         }}
-        mapType="standard"
+        mapType="satellite"
       >
         <Polygon
           coordinates={coords}
@@ -234,8 +254,8 @@ export default function HomeScreen() {
             strokeColor="black"
             strokeWidth={1}
             fillColor={getParcelColor(polyData.parcelId)}
-            tappable={true}
-            onPress={() => colorParcel(polyData.parcelId)}
+            tappable={DEV}
+            onPress={DEV ? () => colorParcel(polyData.parcelId) : undefined}
           />
         ))}
 
@@ -245,88 +265,129 @@ export default function HomeScreen() {
               latitude: location.coords.latitude,
               longitude: location.coords.longitude,
             }}
-          ></Marker>
+            anchor={{ x: 0.5, y: 0.5 }}
+            flat={true}
+          >
+            <View style={styles.locationDot}>
+              <View style={styles.dot} />
+            </View>
+          </Marker>
         )}
       </MapView>
-      <PolygonSelection zoneType={zoneType} onZoneTypeChange={setZoneType} />
 
-      {/* Boutons de sauvegarde et suppression */}
-      <View style={styles.buttonContainer}>
+      {/* Bouton pour centrer sur l'utilisateur */}
+      {location && (
         <TouchableOpacity
-          style={[styles.actionBtn, styles.saveBtn]}
-          onPress={exportColors}
-          disabled={Object.keys(parcelColors).length === 0}
-        >
-          <Text style={{ color: "white", fontWeight: "bold" }}>
-            Exporter ({Object.keys(parcelColors).length})
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.actionBtn, styles.discardBtn]}
+          style={styles.centerBtn}
           onPress={() => {
-            setParcelColors({});
-            Alert.alert("Annulé", "Toutes les colorations ont été effacées.");
+            if (mapRef.current && location) {
+              mapRef.current.animateToRegion({
+                latitude: location.coords.latitude,
+                longitude: location.coords.longitude,
+                latitudeDelta: 0.005,
+                longitudeDelta: 0.005,
+              }, 1000);
+            }
           }}
-          disabled={Object.keys(parcelColors).length === 0}
         >
-          <Text style={{ color: "white", fontWeight: "bold" }}>Effacer</Text>
+          <Text style={styles.centerIcon}>📍</Text>
         </TouchableOpacity>
-      </View>
+      )}
 
-      {!showFiles && !showParcelColors && (
+      {/* Composants d'interface seulement en mode DEV */}
+      {DEV && (
         <>
-          <TouchableOpacity
-            style={[styles.toggleBtn, { top: 90 }]}
-            onPress={() => setShowParcelColors(true)}
-          >
-            <Text style={{ color: "#007AFF", fontWeight: "bold" }}>
-              Voir parcelles coloriées
-            </Text>
-          </TouchableOpacity>
+          <PolygonSelection
+            zoneType={zoneType}
+            onZoneTypeChange={setZoneType}
+          />
+
+          {/* Boutons de sauvegarde et suppression */}
+          <View style={styles.buttonContainer}>
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.saveBtn]}
+              onPress={exportColors}
+              disabled={Object.keys(parcelColors).length === 0}
+            >
+              <Text style={{ color: "white", fontWeight: "bold" }}>
+                Exporter ({Object.keys(parcelColors).length})
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.discardBtn]}
+              onPress={() => {
+                setParcelColors({});
+                Alert.alert(
+                  "Annulé",
+                  "Toutes les colorations ont été effacées."
+                );
+              }}
+              disabled={Object.keys(parcelColors).length === 0}
+            >
+              <Text style={{ color: "white", fontWeight: "bold" }}>
+                Effacer
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {!showFiles && !showParcelColors && (
+            <>
+              <TouchableOpacity
+                style={[styles.toggleBtn, { top: 90 }]}
+                onPress={() => setShowParcelColors(true)}
+              >
+                <Text style={{ color: "#007AFF", fontWeight: "bold" }}>
+                  Voir parcelles coloriées
+                </Text>
+              </TouchableOpacity>
+            </>
+          )}
+
+          {showFiles && (
+            <View
+              style={{
+                position: "absolute",
+                top: 80,
+                left: 20,
+                right: 20,
+                zIndex: 100,
+              }}
+            >
+              <ShowPolygonFiles />
+              <TouchableOpacity
+                style={[styles.toggleBtn, { top: 0, backgroundColor: "#ffe" }]}
+                onPress={() => setShowFiles(false)}
+              >
+                <Text style={{ color: "#007AFF", fontWeight: "bold" }}>
+                  Masquer les fichiers JSON
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {showParcelColors && (
+            <View
+              style={{
+                position: "absolute",
+                top: 80,
+                left: 20,
+                right: 20,
+                zIndex: 100,
+              }}
+            >
+              <ShowParcelColors />
+              <TouchableOpacity
+                style={[styles.toggleBtn, { top: 0, backgroundColor: "#ffe" }]}
+                onPress={() => setShowParcelColors(false)}
+              >
+                <Text style={{ color: "#007AFF", fontWeight: "bold" }}>
+                  Fermer
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </>
-      )}
-
-      {showFiles && (
-        <View
-          style={{
-            position: "absolute",
-            top: 80,
-            left: 20,
-            right: 20,
-            zIndex: 100,
-          }}
-        >
-          <ShowPolygonFiles />
-          <TouchableOpacity
-            style={[styles.toggleBtn, { top: 0, backgroundColor: "#ffe" }]}
-            onPress={() => setShowFiles(false)}
-          >
-            <Text style={{ color: "#007AFF", fontWeight: "bold" }}>
-              Masquer les fichiers JSON
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {showParcelColors && (
-        <View
-          style={{
-            position: "absolute",
-            top: 80,
-            left: 20,
-            right: 20,
-            zIndex: 100,
-          }}
-        >
-          <ShowParcelColors />
-          <TouchableOpacity
-            style={[styles.toggleBtn, { top: 0, backgroundColor: "#ffe" }]}
-            onPress={() => setShowParcelColors(false)}
-          >
-            <Text style={{ color: "#007AFF", fontWeight: "bold" }}>Fermer</Text>
-          </TouchableOpacity>
-        </View>
       )}
     </View>
   );
@@ -382,5 +443,36 @@ const styles = StyleSheet.create({
     elevation: 2,
     borderWidth: 1,
     borderColor: "#007AFF",
+  },
+  locationDot: {
+    width: 20,
+    height: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: "#007AFF",
+    borderWidth: 2,
+    borderColor: "white",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+    elevation: 3,
+  },
+  triangle: {
+    position: "absolute",
+    top: -6,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 4,
+    borderRightWidth: 4,
+    borderBottomWidth: 8,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    borderBottomColor: "#007AFF",
   },
 });

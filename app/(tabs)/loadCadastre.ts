@@ -16,44 +16,74 @@ export function loadCadastrePolygons(): ParcelPolygon[] {
   console.log("📍 Processing cadastre data (ONE TIME ONLY)...");
   console.log("📍 Number of features:", (cadastreData as any).features.length);
 
-  const polygons: ParcelPolygon[] = [];
+  const polygonMap = new Map<string, ParcelPolygon>();
 
   (cadastreData as any).features.forEach(
     (feature: any, featureIndex: number) => {
-      const parcelId = feature.id || `parcelle_${featureIndex}`;
+      const fullParcelId = feature.id || `parcelle_${featureIndex}`;
+      // Extract base ID (without _0_0 suffix) for deduplication
+      const baseParcelId = fullParcelId.replace(/_\d+_\d+$/, "");
+
+      // Skip if we already have this parcel
+      if (polygonMap.has(baseParcelId)) {
+        console.log(
+          `⚠️ Parcelle dupliquée ignorée: ${fullParcelId} (base: ${baseParcelId})`
+        );
+        return;
+      }
+
+      let bestPolygon: {
+        coordinates: { latitude: number; longitude: number }[];
+        area: number;
+      } | null = null;
 
       if (feature.geometry.type === "MultiPolygon") {
-        feature.geometry.coordinates.forEach(
-          (multiPoly: any, multiIndex: number) => {
-            multiPoly.forEach((poly: any, polyIndex: number) => {
-              const coordinates = poly.map(([lng, lat]: [number, number]) => ({
-                latitude: lat,
-                longitude: lng,
-              }));
-              polygons.push({
-                coordinates,
-                parcelId: `${parcelId}_${multiIndex}_${polyIndex}`,
-              });
-            });
-          }
-        );
-      } else if (feature.geometry.type === "Polygon") {
-        feature.geometry.coordinates.forEach((poly: any, polyIndex: number) => {
-          const coordinates = poly.map(([lng, lat]: [number, number]) => ({
-            latitude: lat,
-            longitude: lng,
-          }));
-          polygons.push({
-            coordinates,
-            parcelId: polyIndex === 0 ? parcelId : `${parcelId}_${polyIndex}`,
+        // Pour MultiPolygon, prendre le plus grand polygone
+        feature.geometry.coordinates.forEach((multiPoly: any) => {
+          multiPoly.forEach((poly: any) => {
+            const coordinates = poly.map(([lng, lat]: [number, number]) => ({
+              latitude: lat,
+              longitude: lng,
+            }));
+
+            // Calculer l'aire approximative (somme des distances)
+            const area = coordinates.length;
+
+            if (!bestPolygon || area > bestPolygon.area) {
+              bestPolygon = { coordinates, area };
+            }
           });
+        });
+      } else if (feature.geometry.type === "Polygon") {
+        // Pour Polygon, prendre le premier ring (extérieur)
+        if (feature.geometry.coordinates.length > 0) {
+          const coordinates = feature.geometry.coordinates[0].map(
+            ([lng, lat]: [number, number]) => ({
+              latitude: lat,
+              longitude: lng,
+            })
+          );
+          bestPolygon = { coordinates, area: coordinates.length };
+        }
+      }
+
+      // Ajouter le meilleur polygone pour cette parcelle
+      if (bestPolygon) {
+        polygonMap.set(baseParcelId, {
+          coordinates: bestPolygon.coordinates,
+          parcelId: fullParcelId, // Utiliser l'ID complet pour la coloration
         });
       }
     }
   );
 
+  const polygons = Array.from(polygonMap.values());
+
   console.log(
-    `📍 Total polygons processed: ${polygons.length} (CACHED FOR FUTURE USE)`
+    `📍 Total unique parcels processed: ${polygons.length} (CACHED FOR FUTURE USE)`
+  );
+  console.log(
+    `📍 Features in source: ${(cadastreData as any).features.length}`
   );
 
   // Cache the result
