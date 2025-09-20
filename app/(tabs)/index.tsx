@@ -1,6 +1,13 @@
 import * as FileSystem from "expo-file-system";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  Alert,
+  PanResponder,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import MapView, { Marker, Polygon } from "react-native-maps";
 import PolygonSelection from "../../components/PolygonSelection";
 import ShowParcelColors from "../../components/ShowParcelColors";
@@ -10,8 +17,11 @@ import coordinatesData from "./coordinates.json";
 import { loadCadastrePolygons } from "./loadCadastre";
 import parcelColorsData from "./parcelColors.json";
 
-// DEV constant - set to false for production mode
-const DEV = false;
+// ----------------------------------------------DEV MODE------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------------
+const DEV = false; //---------------------------- DEV MODE------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------------
+// ----------------------------------------------DEV MODE------------------------------------------------------------
 
 export default function HomeScreen() {
   const mapRef = useRef<MapView | null>(null);
@@ -30,6 +40,7 @@ export default function HomeScreen() {
   const [showParcelColors, setShowParcelColors] = useState(false);
   const [colorsLoaded, setColorsLoaded] = useState(false);
   const [mapInitialized, setMapInitialized] = useState(false);
+  const [transparency, setTransparency] = useState(0.3); // 30% par défaut (70% opaque)
   // État pour stocker les colorations des parcelles
   const [parcelColors, setParcelColors] = useState<
     Record<string, "internal" | "shared" | "forbidden">
@@ -64,6 +75,35 @@ export default function HomeScreen() {
       return filtered;
     }
   }, [cadastrePolygons, parcelColors, colorsLoaded]);
+
+  // PanResponder pour le slider tactile
+  const sliderPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: (evt) => {
+          // Calcul initial basé sur la position de départ
+          const sliderHeight = 80;
+          const touchY = evt.nativeEvent.locationY;
+          const relativeY = Math.max(0, Math.min(sliderHeight, touchY));
+          const newTransparency =
+            0.1 + (0.8 * (sliderHeight - relativeY)) / sliderHeight;
+          setTransparency(newTransparency);
+        },
+        onPanResponderMove: (evt) => {
+          // Calcul basé sur la position courante
+          const sliderHeight = 80;
+          const touchY = evt.nativeEvent.locationY;
+          const relativeY = Math.max(0, Math.min(sliderHeight, touchY));
+          const newTransparency =
+            0.1 + (0.8 * (sliderHeight - relativeY)) / sliderHeight;
+          setTransparency(newTransparency);
+        },
+        onPanResponderRelease: () => {},
+      }),
+    []
+  );
 
   // Charger les couleurs au démarrage
   useEffect(() => {
@@ -130,11 +170,11 @@ export default function HomeScreen() {
     const zoneType = parcelColors[parcelId];
     switch (zoneType) {
       case "internal":
-        return "rgba(0, 0, 255, 0.3)"; // Bleu transparent
+        return `rgba(0, 0, 255, ${transparency})`; // Bleu transparent
       case "shared":
-        return "rgba(255, 215, 0, 0.3)"; // Or transparent
+        return `rgba(255, 215, 0, ${transparency})`; // Or transparent
       case "forbidden":
-        return "rgba(255, 0, 0, 0.3)"; // Rouge transparent
+        return `rgba(255, 0, 0, ${transparency})`; // Rouge transparent
       default:
         return "rgba(0, 0, 0, 0)"; // Transparent par défaut
     }
@@ -322,6 +362,33 @@ export default function HomeScreen() {
         </TouchableOpacity>
       )}
 
+      {/* Slider de transparence vertical tactile */}
+      <View style={styles.transparencySlider}>
+        <View
+          style={styles.verticalSliderTrack}
+          {...sliderPanResponder.panHandlers}
+        >
+          <View
+            style={[
+              styles.verticalSliderFill,
+              { height: `${((transparency - 0.1) / 0.8) * 100}%` },
+            ]}
+          />
+          <View
+            style={[
+              styles.sliderThumb,
+              {
+                bottom: `${((transparency - 0.1) / 0.8) * 100}%`,
+              },
+            ]}
+          />
+        </View>
+
+        <Text style={styles.sliderValue}>
+          {Math.round((1 - transparency) * 100)}%
+        </Text>
+      </View>
+
       {/* Composants d'interface seulement en mode DEV */}
       {DEV && (
         <>
@@ -337,7 +404,7 @@ export default function HomeScreen() {
               onPress={exportColors}
               disabled={Object.keys(parcelColors).length === 0}
             >
-              <Text style={{ color: "white", fontWeight: "bold" }}>
+              <Text style={styles.buttonText}>
                 Exporter ({Object.keys(parcelColors).length})
               </Text>
             </TouchableOpacity>
@@ -353,65 +420,39 @@ export default function HomeScreen() {
               }}
               disabled={Object.keys(parcelColors).length === 0}
             >
-              <Text style={{ color: "white", fontWeight: "bold" }}>
-                Effacer
-              </Text>
+              <Text style={styles.buttonText}>Effacer</Text>
             </TouchableOpacity>
           </View>
 
           {!showFiles && !showParcelColors && (
-            <>
-              <TouchableOpacity
-                style={[styles.toggleBtn, { top: 90 }]}
-                onPress={() => setShowParcelColors(true)}
-              >
-                <Text style={{ color: "#007AFF", fontWeight: "bold" }}>
-                  Voir parcelles coloriées
-                </Text>
-              </TouchableOpacity>
-            </>
+            <TouchableOpacity
+              style={styles.toggleBtnTop90}
+              onPress={() => setShowParcelColors(true)}
+            >
+              <Text style={styles.blueText}>Voir parcelles coloriées</Text>
+            </TouchableOpacity>
           )}
 
           {showFiles && (
-            <View
-              style={{
-                position: "absolute",
-                top: 80,
-                left: 20,
-                right: 20,
-                zIndex: 100,
-              }}
-            >
+            <View style={styles.overlayContainer}>
               <ShowPolygonFiles />
               <TouchableOpacity
-                style={[styles.toggleBtn, { top: 0, backgroundColor: "#ffe" }]}
+                style={styles.toggleBtnYellow}
                 onPress={() => setShowFiles(false)}
               >
-                <Text style={{ color: "#007AFF", fontWeight: "bold" }}>
-                  Masquer les fichiers JSON
-                </Text>
+                <Text style={styles.blueText}>Masquer les fichiers JSON</Text>
               </TouchableOpacity>
             </View>
           )}
 
           {showParcelColors && (
-            <View
-              style={{
-                position: "absolute",
-                top: 80,
-                left: 20,
-                right: 20,
-                zIndex: 100,
-              }}
-            >
+            <View style={styles.overlayContainer}>
               <ShowParcelColors />
               <TouchableOpacity
-                style={[styles.toggleBtn, { top: 0, backgroundColor: "#ffe" }]}
+                style={styles.toggleBtnYellow}
                 onPress={() => setShowParcelColors(false)}
               >
-                <Text style={{ color: "#007AFF", fontWeight: "bold" }}>
-                  Fermer
-                </Text>
+                <Text style={styles.blueText}>Fermer</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -511,5 +552,102 @@ const styles = StyleSheet.create({
   },
   centerIcon: {
     fontSize: 20,
+  },
+  overlayContainer: {
+    position: "absolute",
+    top: 80,
+    left: 20,
+    right: 20,
+    zIndex: 100,
+  },
+  toggleBtnTop90: {
+    position: "absolute",
+    top: 90,
+    left: 20,
+    right: 20,
+    backgroundColor: "#fff",
+    padding: 12,
+    borderRadius: 8,
+    alignItems: "center",
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: "#007AFF",
+  },
+  toggleBtnYellow: {
+    position: "absolute",
+    top: 0,
+    left: 20,
+    right: 20,
+    backgroundColor: "#ffe",
+    padding: 12,
+    borderRadius: 8,
+    alignItems: "center",
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: "#007AFF",
+  },
+  buttonText: {
+    color: "white",
+    fontWeight: "bold",
+  },
+  blueText: {
+    color: "#007AFF",
+    fontWeight: "bold",
+  },
+  transparencySlider: {
+    position: "absolute",
+    top: 160,
+    right: 20,
+    width: 50,
+    backgroundColor: "white",
+    borderRadius: 25,
+    padding: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+    borderWidth: 1,
+    borderColor: "#ddd",
+    alignItems: "center",
+  },
+  verticalSliderTrack: {
+    width: 8,
+    height: 80,
+    backgroundColor: "#d3d3d3",
+    borderRadius: 4,
+    marginVertical: 8,
+    overflow: "visible",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    position: "relative",
+  },
+  verticalSliderFill: {
+    position: "absolute",
+    bottom: 0,
+    width: "100%",
+    backgroundColor: "#007AFF",
+    borderRadius: 4,
+  },
+  sliderThumb: {
+    position: "absolute",
+    width: 16,
+    height: 16,
+    backgroundColor: "#007AFF",
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: "white",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+    elevation: 3,
+    transform: [{ translateY: 8 }], // Centrer sur la track
+  },
+  sliderValue: {
+    fontSize: 10,
+    color: "#333",
+    fontWeight: "600",
+    marginTop: 4,
   },
 });
