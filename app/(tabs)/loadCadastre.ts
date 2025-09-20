@@ -13,24 +13,14 @@ export function loadCadastrePolygons(): ParcelPolygon[] {
     return cachedPolygons;
   }
 
-  console.log("📍 Processing cadastre data (ONE TIME ONLY)...");
+  console.log("📍 Processing clean cadastre data (ONE TIME ONLY)...");
   console.log("📍 Number of features:", (cadastreData as any).features.length);
 
-  const polygonMap = new Map<string, ParcelPolygon>();
+  const polygons: ParcelPolygon[] = [];
 
   (cadastreData as any).features.forEach(
     (feature: any, featureIndex: number) => {
       const fullParcelId = feature.id || `parcelle_${featureIndex}`;
-      // Extract base ID (without _0_0 suffix) for deduplication
-      const baseParcelId = fullParcelId.replace(/_\d+_\d+$/, "");
-
-      // Skip if we already have this parcel
-      if (polygonMap.has(baseParcelId)) {
-        console.log(
-          `⚠️ Parcelle dupliquée ignorée: ${fullParcelId} (base: ${baseParcelId})`
-        );
-        return;
-      }
 
       let bestPolygon: {
         coordinates: { latitude: number; longitude: number }[];
@@ -67,9 +57,9 @@ export function loadCadastrePolygons(): ParcelPolygon[] {
         }
       }
 
-      // Ajouter le meilleur polygone pour cette parcelle
+      // Ajouter le polygone pour cette parcelle
       if (bestPolygon) {
-        polygonMap.set(baseParcelId, {
+        polygons.push({
           coordinates: bestPolygon.coordinates,
           parcelId: fullParcelId, // Utiliser l'ID complet pour la coloration
         });
@@ -77,13 +67,8 @@ export function loadCadastrePolygons(): ParcelPolygon[] {
     }
   );
 
-  const polygons = Array.from(polygonMap.values());
-
   console.log(
-    `📍 Total unique parcels processed: ${polygons.length} (CACHED FOR FUTURE USE)`
-  );
-  console.log(
-    `📍 Features in source: ${(cadastreData as any).features.length}`
+    `📍 Total parcels processed: ${polygons.length} (CACHED FOR FUTURE USE)`
   );
 
   // Cache the result

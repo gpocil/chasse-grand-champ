@@ -40,6 +40,31 @@ export default function HomeScreen() {
     return loadCadastrePolygons();
   }, []);
 
+  // Filtrer les polygones selon le mode DEV
+  const displayedPolygons = useMemo(() => {
+    if (DEV) {
+      // Mode développement : afficher tous les polygones
+      console.log(
+        `🔧 Mode DEV: Affichage de tous les polygones (${cadastrePolygons.length})`
+      );
+      return cadastrePolygons;
+    } else {
+      // Mode production : afficher seulement les polygones colorés
+      if (!colorsLoaded || Object.keys(parcelColors).length === 0) {
+        return [];
+      }
+
+      const filtered = cadastrePolygons.filter(
+        (polygon) => parcelColors[polygon.parcelId] !== undefined
+      );
+
+      console.log(
+        `🎨 Mode production: Polygones colorés seulement (${filtered.length}/${cadastrePolygons.length})`
+      );
+      return filtered;
+    }
+  }, [cadastrePolygons, parcelColors, colorsLoaded]);
+
   // Charger les couleurs au démarrage
   useEffect(() => {
     if (colorsLoaded) return; // Éviter les rechargements multiples
@@ -163,13 +188,13 @@ export default function HomeScreen() {
   };
 
   useEffect(() => {
-    if (mapRef.current && !mapInitialized && cadastrePolygons.length > 0) {
+    if (mapRef.current && !mapInitialized && displayedPolygons.length > 0) {
       // Calculate bounds manually to avoid stack overflow with fitToCoordinates
       let allCoordinates = [...coords];
 
-      if (cadastrePolygons.length > 0) {
-        // Add all first coordinates from cadastre polygons
-        cadastrePolygons.forEach((polyData) => {
+      if (displayedPolygons.length > 0) {
+        // Add all first coordinates from displayed polygons
+        displayedPolygons.forEach((polyData) => {
           if (polyData.coordinates.length > 0) {
             allCoordinates.push(polyData.coordinates[0]);
           }
@@ -212,7 +237,7 @@ export default function HomeScreen() {
         setMapInitialized(true);
       }
     }
-  }, [mapInitialized, cadastrePolygons.length]);
+  }, [mapInitialized, displayedPolygons.length]);
 
   // Separate effect for zone changes (keeping for UI consistency)
   useEffect(() => {
@@ -247,12 +272,12 @@ export default function HomeScreen() {
           fillColor="rgba(0,0,0,0)"
         />
 
-        {cadastrePolygons.map((polyData, idx) => (
+        {displayedPolygons.map((polyData, idx) => (
           <Polygon
             key={`cadastre-${idx}`}
             coordinates={polyData.coordinates}
-            strokeColor="black"
-            strokeWidth={1}
+            strokeColor={DEV ? "black" : "transparent"}
+            strokeWidth={DEV ? 1 : 0}
             fillColor={getParcelColor(polyData.parcelId)}
             tappable={DEV}
             onPress={DEV ? () => colorParcel(polyData.parcelId) : undefined}
@@ -281,12 +306,15 @@ export default function HomeScreen() {
           style={styles.centerBtn}
           onPress={() => {
             if (mapRef.current && location) {
-              mapRef.current.animateToRegion({
-                latitude: location.coords.latitude,
-                longitude: location.coords.longitude,
-                latitudeDelta: 0.005,
-                longitudeDelta: 0.005,
-              }, 1000);
+              mapRef.current.animateToRegion(
+                {
+                  latitude: location.coords.latitude,
+                  longitude: location.coords.longitude,
+                  latitudeDelta: 0.005,
+                  longitudeDelta: 0.005,
+                },
+                1000
+              );
             }
           }}
         >
@@ -445,34 +473,43 @@ const styles = StyleSheet.create({
     borderColor: "#007AFF",
   },
   locationDot: {
-    width: 20,
-    height: 20,
+    width: 24,
+    height: 24,
     alignItems: "center",
     justifyContent: "center",
   },
   dot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     backgroundColor: "#007AFF",
-    borderWidth: 2,
+    borderWidth: 3,
     borderColor: "white",
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.3,
-    shadowRadius: 2,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 3,
+    elevation: 5,
   },
-  triangle: {
+  centerBtn: {
     position: "absolute",
-    top: -6,
-    width: 0,
-    height: 0,
-    borderLeftWidth: 4,
-    borderRightWidth: 4,
-    borderBottomWidth: 8,
-    borderLeftColor: "transparent",
-    borderRightColor: "transparent",
-    borderBottomColor: "#007AFF",
+    top: 100,
+    right: 20,
+    width: 48,
+    height: 48,
+    backgroundColor: "white",
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+    borderWidth: 1,
+    borderColor: "#ddd",
+  },
+  centerIcon: {
+    fontSize: 20,
   },
 });
