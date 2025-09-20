@@ -1,11 +1,14 @@
+import * as FileSystem from "expo-file-system";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import MapView, { Marker, Polygon } from "react-native-maps";
+import PolygonSelection from "../../components/PolygonSelection";
+import ShowParcelColors from "../../components/ShowParcelColors";
+import ShowPolygonFiles from "../../components/ShowPolygonFiles";
 import { useGeolocation } from "../../hooks/useGeolocation";
-import PolygonSelection from "../PolygonSelection";
-import ShowPolygonFiles from "../ShowPolygonFiles";
 import coordinatesData from "./coordinates.json";
 import { loadCadastrePolygons } from "./loadCadastre";
+import parcelColorsData from "./parcelColors.json";
 
 export default function HomeScreen() {
   const mapRef = useRef<MapView | null>(null);
@@ -21,33 +24,175 @@ export default function HomeScreen() {
     "internal"
   );
   const [showFiles, setShowFiles] = useState(false);
+  const [showParcelColors, setShowParcelColors] = useState(false);
+  const [colorsLoaded, setColorsLoaded] = useState(false);
+  const [mapInitialized, setMapInitialized] = useState(false);
+  // État pour stocker les colorations des parcelles
+  const [parcelColors, setParcelColors] = useState<
+    Record<string, "internal" | "shared" | "forbidden">
+  >({});
 
   // Load cadastre polygons once using cached function
   const cadastrePolygons = useMemo(() => {
     return loadCadastrePolygons();
   }, []);
 
+  // Charger les couleurs au démarrage (depuis le fichier statique et l'appareil) - UNE SEULE FOIS
   useEffect(() => {
-    if (mapRef.current) {
-      // Fit to both coords and cadastre polygons if available
+    if (colorsLoaded) return; // Éviter les rechargements multiples
+
+    const loadColors = async () => {
+      try {
+        // 1. Charger les couleurs depuis le fichier statique du code
+        const staticColors = (parcelColorsData as any).parcelColors || {};
+
+        // 2. Essayer de charger les couleurs depuis l'appareil
+        let deviceColors = {};
+        try {
+          const filePath = FileSystem.documentDirectory + "parcelColors.json";
+          const deviceData = await FileSystem.readAsStringAsync(filePath);
+          const parsedDeviceData = JSON.parse(deviceData);
+          deviceColors = parsedDeviceData.parcelColors || {};
+          console.log(
+            "📱 Couleurs chargées depuis l'appareil:",
+            Object.keys(deviceColors).length
+          );
+        } catch (error) {
+          console.log("📱 Aucun fichier de couleurs sur l'appareil");
+        }
+
+        // 3. Combiner les couleurs (l'appareil a priorité sur le code statique)
+        const combinedColors = { ...staticColors, ...deviceColors };
+        setParcelColors(combinedColors);
+        setColorsLoaded(true);
+
+        console.log(
+          "🎨 Couleurs totales chargées:",
+          Object.keys(combinedColors).length
+        );
+        console.log(
+          "🎨 Depuis le code statique:",
+          Object.keys(staticColors).length
+        );
+        console.log("🎨 Depuis l'appareil:", Object.keys(deviceColors).length);
+      } catch (error) {
+        console.error("❌ Erreur lors du chargement des couleurs:", error);
+        setColorsLoaded(true);
+      }
+    };
+
+    loadColors();
+  }, [colorsLoaded]);
+
+  // Fonction pour obtenir la couleur d'une parcelle
+  const getParcelColor = (parcelId: string) => {
+    const zoneType = parcelColors[parcelId];
+    switch (zoneType) {
+      case "internal":
+        return "rgba(0, 0, 255, 0.3)"; // Bleu transparent
+      case "shared":
+        return "rgba(255, 215, 0, 0.3)"; // Or transparent
+      case "forbidden":
+        return "rgba(255, 0, 0, 0.3)"; // Rouge transparent
+      default:
+        return "rgba(0, 0, 0, 0)"; // Transparent par défaut
+    }
+  };
+
+  // Fonction pour colorier une parcelle
+  const colorParcel = (parcelId: string) => {
+    const newColors = { ...parcelColors };
+    if (newColors[parcelId] === zoneType) {
+      // Si déjà colorié avec cette couleur, on enlève la couleur
+      delete newColors[parcelId];
+    } else {
+      // Sinon on applique la nouvelle couleur
+      newColors[parcelId] = zoneType;
+    }
+    setParcelColors(newColors);
+    console.log(`🎨 Parcelle ${parcelId} colorée en ${zoneType}`);
+  };
+
+  // Fonction pour exporter les colorations dans un fichier sur l'appareil
+  const exportColors = async () => {
+    try {
+      const exportData = {
+        parcelColors: parcelColors,
+        totalParcelles: Object.keys(parcelColors).length,
+        derniereModification: new Date().toISOString(),
+      };
+
+      const jsonString = JSON.stringify(exportData, null, 2);
+      const filePath = FileSystem.documentDirectory + "parcelColors.json";
+
+      await FileSystem.writeAsStringAsync(filePath, jsonString);
+
+      console.log("📤 EXPORT - Fichier sauvegardé:", filePath);
+      console.log("📤 Contenu:", jsonString);
+
+      Alert.alert(
+        "Export réussi !",
+        `${
+          Object.keys(parcelColors).length
+        } parcelles coloriées sauvegardées.\nFichier: parcelColors.json`
+      );
+    } catch (error) {
+      console.error("Erreur lors de l'export:", error);
+      Alert.alert("Erreur", "Impossible de sauvegarder le fichier.");
+    }
+  };
+
+  useEffect(() => {
+    if (mapRef.current && !mapInitialized && cadastrePolygons.length > 0) {
+      // Calculate bounds manually to avoid stack overflow with fitToCoordinates
       let allCoordinates = [...coords];
 
       if (cadastrePolygons.length > 0) {
-        // Add some cadastre coordinates to the fit
-        cadastrePolygons.slice(0, 5).forEach((poly) => {
-          if (poly.length > 0) {
-            allCoordinates.push(poly[0]); // Add first coordinate of each polygon
+        // Add all first coordinates from cadastre polygons
+        cadastrePolygons.forEach((polyData) => {
+          if (polyData.coordinates.length > 0) {
+            allCoordinates.push(polyData.coordinates[0]);
           }
         });
-        console.log("📍 Fitting map to", allCoordinates.length, "coordinates");
       }
 
-      mapRef.current.fitToCoordinates(allCoordinates, {
-        edgePadding: { top: 50, right: 50, bottom: 50, left: 50 },
-        animated: true,
-      });
+      console.log(
+        "📍 Calculating bounds for",
+        allCoordinates.length,
+        "coordinates"
+      );
+
+      if (allCoordinates.length > 0) {
+        // Calculate min/max bounds
+        let minLat = allCoordinates[0].latitude;
+        let maxLat = allCoordinates[0].latitude;
+        let minLng = allCoordinates[0].longitude;
+        let maxLng = allCoordinates[0].longitude;
+
+        allCoordinates.forEach((coord) => {
+          minLat = Math.min(minLat, coord.latitude);
+          maxLat = Math.max(maxLat, coord.latitude);
+          minLng = Math.min(minLng, coord.longitude);
+          maxLng = Math.max(maxLng, coord.longitude);
+        });
+
+        // Add padding
+        const latPadding = (maxLat - minLat) * 0.1;
+        const lngPadding = (maxLng - minLng) * 0.1;
+
+        const region = {
+          latitude: (minLat + maxLat) / 2,
+          longitude: (minLng + maxLng) / 2,
+          latitudeDelta: maxLat - minLat + latPadding,
+          longitudeDelta: maxLng - minLng + lngPadding,
+        };
+
+        console.log("📍 Setting region:", region);
+        mapRef.current.animateToRegion(region, 1000);
+        setMapInitialized(true);
+      }
     }
-  }, []);
+  }, [mapInitialized, cadastrePolygons.length]);
 
   // Separate effect for zone changes (keeping for UI consistency)
   useEffect(() => {
@@ -82,13 +227,15 @@ export default function HomeScreen() {
           fillColor="rgba(0,0,0,0)"
         />
 
-        {cadastrePolygons.map((poly, idx) => (
+        {cadastrePolygons.map((polyData, idx) => (
           <Polygon
             key={`cadastre-${idx}`}
-            coordinates={poly}
+            coordinates={polyData.coordinates}
             strokeColor="black"
             strokeWidth={1}
-            fillColor="rgba(0,0,0,0)"
+            fillColor={getParcelColor(polyData.parcelId)}
+            tappable={true}
+            onPress={() => colorParcel(polyData.parcelId)}
           />
         ))}
 
@@ -107,32 +254,39 @@ export default function HomeScreen() {
       <View style={styles.buttonContainer}>
         <TouchableOpacity
           style={[styles.actionBtn, styles.saveBtn]}
-          onPress={() => {}}
-          disabled={true}
+          onPress={exportColors}
+          disabled={Object.keys(parcelColors).length === 0}
         >
           <Text style={{ color: "white", fontWeight: "bold" }}>
-            Sauvegarder
+            Exporter ({Object.keys(parcelColors).length})
           </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={[styles.actionBtn, styles.discardBtn]}
-          onPress={() => {}}
-          disabled={true}
+          onPress={() => {
+            setParcelColors({});
+            Alert.alert("Annulé", "Toutes les colorations ont été effacées.");
+          }}
+          disabled={Object.keys(parcelColors).length === 0}
         >
-          <Text style={{ color: "white", fontWeight: "bold" }}>Annuler</Text>
+          <Text style={{ color: "white", fontWeight: "bold" }}>Effacer</Text>
         </TouchableOpacity>
       </View>
-      {!showFiles && (
-        <TouchableOpacity
-          style={styles.toggleBtn}
-          onPress={() => setShowFiles(true)}
-        >
-          <Text style={{ color: "#007AFF", fontWeight: "bold" }}>
-            Afficher les fichiers JSON
-          </Text>
-        </TouchableOpacity>
+
+      {!showFiles && !showParcelColors && (
+        <>
+          <TouchableOpacity
+            style={[styles.toggleBtn, { top: 90 }]}
+            onPress={() => setShowParcelColors(true)}
+          >
+            <Text style={{ color: "#007AFF", fontWeight: "bold" }}>
+              Voir parcelles coloriées
+            </Text>
+          </TouchableOpacity>
+        </>
       )}
+
       {showFiles && (
         <View
           style={{
@@ -151,6 +305,26 @@ export default function HomeScreen() {
             <Text style={{ color: "#007AFF", fontWeight: "bold" }}>
               Masquer les fichiers JSON
             </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {showParcelColors && (
+        <View
+          style={{
+            position: "absolute",
+            top: 80,
+            left: 20,
+            right: 20,
+            zIndex: 100,
+          }}
+        >
+          <ShowParcelColors />
+          <TouchableOpacity
+            style={[styles.toggleBtn, { top: 0, backgroundColor: "#ffe" }]}
+            onPress={() => setShowParcelColors(false)}
+          >
+            <Text style={{ color: "#007AFF", fontWeight: "bold" }}>Fermer</Text>
           </TouchableOpacity>
         </View>
       )}

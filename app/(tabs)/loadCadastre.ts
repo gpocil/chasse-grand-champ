@@ -1,11 +1,13 @@
 import cadastreData from "./cadastre.json";
 
-let cachedPolygons: { latitude: number; longitude: number }[][] | null = null;
+type ParcelPolygon = {
+  coordinates: { latitude: number; longitude: number }[];
+  parcelId: string;
+};
 
-export function loadCadastrePolygons(): {
-  latitude: number;
-  longitude: number;
-}[][] {
+let cachedPolygons: ParcelPolygon[] | null = null;
+
+export function loadCadastrePolygons(): ParcelPolygon[] {
   // Return cached polygons if already processed
   if (cachedPolygons !== null) {
     return cachedPolygons;
@@ -14,10 +16,12 @@ export function loadCadastrePolygons(): {
   console.log("📍 Processing cadastre data (ONE TIME ONLY)...");
   console.log("📍 Number of features:", (cadastreData as any).features.length);
 
-  const polygons: { latitude: number; longitude: number }[][] = [];
+  const polygons: ParcelPolygon[] = [];
 
   (cadastreData as any).features.forEach(
     (feature: any, featureIndex: number) => {
+      const parcelId = feature.id || `parcelle_${featureIndex}`;
+
       if (feature.geometry.type === "MultiPolygon") {
         feature.geometry.coordinates.forEach(
           (multiPoly: any, multiIndex: number) => {
@@ -26,7 +30,10 @@ export function loadCadastrePolygons(): {
                 latitude: lat,
                 longitude: lng,
               }));
-              polygons.push(coordinates);
+              polygons.push({
+                coordinates,
+                parcelId: `${parcelId}_${multiIndex}_${polyIndex}`,
+              });
             });
           }
         );
@@ -36,7 +43,10 @@ export function loadCadastrePolygons(): {
             latitude: lat,
             longitude: lng,
           }));
-          polygons.push(coordinates);
+          polygons.push({
+            coordinates,
+            parcelId: polyIndex === 0 ? parcelId : `${parcelId}_${polyIndex}`,
+          });
         });
       }
     }
